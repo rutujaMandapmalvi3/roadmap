@@ -2,18 +2,25 @@ require('dotenv').config();
 const connectDB = require('./db');
 const express = require('express');
 const app = express();
+const rateLimit = require('express-rate-limit');
 const conversationRoutes = require('./routes/conversations');
 const chatRoutes = require('./routes/chat');
-const authMiddleware = require('./middleware/auth');
-app.use('/chat', authMiddleware);           // protect chat
-app.use('/conversations', authMiddleware); // protect conversations 
+const authMiddleware = require('./middleware/auth'); 
 
-
-app.use(express.json()); //middleware to parse JSON bodies
-app.use('/conversations', conversationRoutes); //mount the conversation routes
-app.use('/chat', chatRoutes); //mount the chat routes
 const PORT = 3000;
 
+  const limiter = rateLimit({                               
+    windowMs: 15 * 60 * 1000, // 15 * 60 * 1000 = 900,000 milliseconds = 15 minutes
+    max: 50,                   // 50 requests per IP per window
+    message: { error: 'Too many requests, please try again later.' }                                                                          
+  });
+
+app.use(express.json()); //middleware to parse JSON bodies
+app.use(limiter);
+app.use('/chat', authMiddleware);           // protect chat
+app.use('/conversations', authMiddleware); // protect conversations
+app.use('/conversations', conversationRoutes); //mount the conversation routes
+app.use('/chat', chatRoutes); //mount the chat routes
 
 connectDB();
 

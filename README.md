@@ -8,33 +8,36 @@ AI-powered app that generates personalized visual learning roadmaps based on use
 
 ```
 User opens app
-    ->  Authentication — Cognito verifies JWT token on every request. No valid token = request rejected before hitting any route.
+    ->  Authentication — JWT token sent in every request header (Authorization: Bearer <token>)
+            ->  authMiddleware verifies token signature + expiry using JWT_SECRET
+            ->  Invalid or missing token = 401 rejected before hitting any route
+            ->  Valid token = user info attached to req.user, request continues
 
 User fills form (what to learn, current level, timeframe, goal)
     ->  Request hits the server
-    ->  Rate limiting — max N requests per user per minute. Prevents abuse and protects OpenAI API costs.
-    ->  Input validation — all required fields must be present and non-empty. Rejected early if missing.
+    ->  Rate limiting — 50 requests per IP per 15 min window. Exceeded = 429, request blocked. Protects OpenAI costs + prevents abuse.
+    ->  Input validation (Zod) — all fields checked for type, length, and allowed values before any processing. Bad input = 400 rejected immediately. OpenAI never called.
 
 Server builds context
-    ->  New conversation: system prompt (AI personality) + user form input sent to OpenAI
+    ->  New conversation: system prompt (AI personality + exact JSON schema) + user form input sent to OpenAI
     ->  Returning user: full conversation history fetched from MongoDB
-            ->  Sliding window applied — only last 10 messages sent to OpenAI (keeps token usage low, controls cost)
-            ->  New message appended to history as context
+            ->  Sliding window — only last 10 messages sent to OpenAI (controls token usage + cost)
+            ->  New follow-up message appended to sliced history
 
 OpenAI generates roadmap
-    ->  Forced JSON output — structured response every time, no free-form text that could break the app
-    ->  Accuracy — system prompt instructs AI to return phases, milestones, and resources in a consistent schema
-    ->  Rate limit handling — if OpenAI throttles the request, user gets a friendly "try again" message instead of a crash
-    ->  Fallback — if OpenAI is down, error is caught and surfaced cleanly to the user
+    ->  Forced structured JSON output — response_format: json_object guarantees valid JSON every time
+    ->  Output validation (Zod) — response checked against expected schema (phases, milestones, resources) before saving. Wrong shape = 500 + retry prompt to user.
+    ->  Rate limit handling — OpenAI 429 returns friendly "slow down" message instead of crash
+    ->  Fallback — any other OpenAI error caught and surfaced cleanly
 
-Roadmap saved to database
-    ->  New conversation: stored with userId, full message history, and roadmap
-    ->  Existing conversation: history updated, roadmap replaced with latest version
-    ->  Timestamps auto-recorded on every save
+Roadmap saved to database (MongoDB Atlas)
+    ->  New conversation: userId + full message history + roadmap stored as new document
+    ->  Existing conversation: messages array updated, roadmap replaced with latest version, timestamps updated
+    ->  Nothing malformed ever reaches the database — input + output both validated before save
 
 Response returned to frontend
-    ->  Full conversation document returned including roadmap JSON
-    ->  Frontend renders roadmap visually using React Flow (nodes, edges, phases, milestones)
+    ->  Full conversation document returned (includes _id, messages, roadmap JSON, timestamps)
+    ->  Frontend renders roadmap visually using React Flow (phases as nodes, milestones as edges)
     ->  User can refine — follow-up messages loop back into the pipeline with conversation history as context
 ```
 
