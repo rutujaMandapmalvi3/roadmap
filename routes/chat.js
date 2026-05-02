@@ -1,93 +1,99 @@
 const express = require('express');
-const router = express.Router();
-const { z } = require('zod');
-const { generateRoadmap } = require('../services/openai'); // OpenAI wrapper
-const Conversation = require('../models/Conversation'); // Mongoose model
+const router = express.Router(); // mini Express app just for /chat routes
+const { z } = require('zod'); // validation library — checks input/output shape at runtime
 
-// defines what valid input looks like for a fresh conversation                                                                             
+const { generateRoadmap } = require('../services/openai'); // OpenAI wrapper — handles API call + error handling
+const Conversation = require('../models/Conversation'); // Mongoose model — maps to conversations collection
+
+// defines what valid input looks like for a fresh conversation — rejects bad data before it hits OpenAI
 const freshChatSchema = z.object({
-    userId: z.string().min(1),          // must be a non-empty string                                                                         
-    topic: z.string().min(2),           // at least 2 chars — catches gibberish like "a"                                                      
-    currentLevel: z.enum(['beginner', 'intermediate', 'advanced']),  // only these 3 values allowed                                           
+    topic: z.string().min(2),
+    currentLevel: z.enum(['beginner', 'intermediate', 'advanced']),
     timeframe: z.string().min(1),
-    goal: z.string().min(10)            // at least 10 chars — forces a real goal, not "idk"                                                  
+    goal: z.string().min(3)
 });
 
-// defines what valid input looks like for a follow-up                                                                                      
+// defines what valid input looks like for a follow-up — different fields than fresh start
 const followUpSchema = z.object({
-    conversationId: z.string().min(1),
-    followUpMessage: z.string().min(1)
+    conversationId: z.string().min(1),  // MongoDB _id of the existing conversation
+    followUpMessage: z.string().min(1)  // the user's follow-up question
 });
 
+// defines the shape we expect back from OpenAI — validates output before saving to MongoDB
 const roadmapSchema = z.object({
     phases: z.array(z.object({
         title: z.string(),
         duration: z.string(),
         milestones: z.array(z.object({
             title: z.string(),
-            resources: z.array(z.string())
+            resources: z.array(z.string()) // array of resource links/names
         }))
     }))
 });
 
 
+// POST / — handles both fresh roadmap generation and follow-up refinements
 router.post('/', async (req, res) => {
+    console.log('body:', req.body);
 
-    const isFollowUp = !!req.body.conversationId; // true if conversationId exists, false if not                                                
+    const isFollowUp = !!req.body.conversationId; // true if conversationId exists in body, false if not
 
+    // pick the right schema — follow-up needs conversationId+message, fresh needs topic/level/etc
     const validation = isFollowUp
-        ? followUpSchema.safeParse(req.body)    // validate follow-up fields                                                                      
-        : freshChatSchema.safeParse(req.body);  // validate fresh start fields                                                                    
+        ? followUpSchema.safeParse(req.body)    // validate follow-up fields
+        : freshChatSchema.safeParse(req.body);  // validate fresh start fields
 
     if (!validation.success) {
-        return res.status(400).json({ error: validation.error.errors }); // reject bad input immediately                                          
+        return res.status(400).json({ error: validation.error.errors }); // 400 = Bad Request — reject before hitting OpenAI
     }
-    try {
-        const { userId, topic, currentLevel, timeframe, goal, conversationId, followUpMessage } = req.body; // added conversationId +followUpMessage for history
 
-        let messages;
-        let existingConvo = null;
+    try {
+        // destructure all possible fields — not all will exist depending on fresh vs follow-up
+        const { topic, currentLevel, timeframe, goal, conversationId, followUpMessage } = req.body;
+        const userId = req.user.userId;
+
+        let messages; // will hold the message array sent to OpenAI
+        let existingConvo = null; // will hold the MongoDB doc if this is a follow-up
 
         if (conversationId) {
-            // follow-up message — fetch existing conversation
-            existingConvo = await Conversation.findById(conversationId); // get the full conversation from MongoDB
+            // follow-up — fetch existing conversation from MongoDB
+            existingConvo = await Conversation.findById(conversationId);
             if (!existingConvo) return res.status(404).json({ error: 'Conversation not found' });
 
-            const history = existingConvo.messages.slice(-10); // sliding window — last 10 messages only, avoids token limit
+            const history = existingConvo.messages.slice(-10); // sliding window — last 10 messages only, keeps token cost low
             messages = [...history, { role: 'user', content: followUpMessage }]; // append new message to history
         } else {
-            // fresh start — no history
+            // fresh start — build messages array from scratch with system prompt + user input
             messages = [
-                {role: 'system', content: 'You are an expert learning coach. Return a JSON object with this exact structure: { "phases": [{ "title": string, "duration": string, "milestones": [{ "title": string, "resources": [string] }] }] }'},
-                
+                { role: 'system', content: 'You are an expert learning coach. Return a JSON object with this exact structure: { "phases": [{ "title": string, "duration": string, "milestones": [{ "title": string, "resources": [string] }] }] }' },
                 { role: 'user', content: `Topic: ${topic}. Current level: ${currentLevel}. Timeframe: ${timeframe}. Goal: ${goal}.` }
             ];
         }
 
-        const roadmap = await generateRoadmap(messages); // call OpenAI
-          const parsedRoadmap = JSON.parse(roadmap); // convert string to JS object                                                                   
-                                                                                                                                              
-  const roadmapValidation = roadmapSchema.safeParse(parsedRoadmap); // check it matches expected shape                                        
-  if (!roadmapValidation.success) {                                                                                                           
-    return res.status(500).json({ error: 'OpenAI returned an unexpected structure. Please try again.' });                                     
-  } 
+        const roadmap = await generateRoadmap(messages); // call OpenAI — returns raw JSON string
+        const parsedRoadmap = JSON.parse(roadmap); // convert string → JS object so Zod can validate it
+
+        const roadmapValidation = roadmapSchema.safeParse(parsedRoadmap); // validate OpenAI output matches expected shape
+        if (!roadmapValidation.success) {
+            return res.status(500).json({ error: 'OpenAI returned an unexpected structure. Please try again.' });
+        }
 
         if (existingConvo) {
-            // update existing conversation — push new message + update roadmap
+            // follow-up — push new messages to history and overwrite roadmap with updated version
             existingConvo.messages.push({ role: 'user', content: followUpMessage });
             existingConvo.messages.push({ role: 'assistant', content: roadmap });
-            existingConvo.roadmap = JSON.parse(roadmap);
-            await existingConvo.save(); // markModified not needed — mongoose detects top-level field changes
-            res.json(existingConvo);
+            existingConvo.roadmap = JSON.parse(roadmap); // replace roadmap with latest version
+            await existingConvo.save(); // markModified not needed — Mongoose detects top-level field replacement
+            res.json(existingConvo); // send back updated conversation
         } else {
-            // create new conversation
+            // fresh start — create new conversation document in MongoDB
             const convo = await Conversation.create({ userId, messages, roadmap: JSON.parse(roadmap) });
-            res.status(201).json(convo);
+            res.status(201).json(convo); // 201 = Created — sends back the new conversation object including _id and roadmap
         }
 
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: error.message }); // catch-all — includes OpenAI errors forwarded from openai.js
     }
 });
 
-module.exports = router;
+module.exports = router; // export so index.js can mount this at /chat
