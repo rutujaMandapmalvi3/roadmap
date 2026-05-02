@@ -9,7 +9,7 @@ const verifier = CognitoJwtVerifier.create({
                         // access token would only tell us the user is logged in, not who they are
   clientId: '4vfubuuruohh4sf1l2ihi57os7',
 });
-
+ 
 const authMiddleware = async (req, res, next) => {
   // frontend sends: Authorization: Bearer <token>
   // split(' ')[1] extracts just the token part after "Bearer "
