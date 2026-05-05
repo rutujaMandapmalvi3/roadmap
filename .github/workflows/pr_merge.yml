@@ -1,0 +1,49 @@
+
+name: PR merge
+on:
+    push:
+        branches: [main, test_pr]
+    
+    pull_request:	
+        branches:
+            [main]
+        types: [opened, synchronize, reopened]
+
+    workflow_dispatch:
+        inputs:
+            env_setup:
+                description: 'adds run workflow to UI'
+                required: true 
+                default: ‘staging’
+                type: choice
+                options: [staging, production]
+
+env:
+    NODE_VERSION: ’24’
+
+jobs:
+    OnPushRun:
+        name: OnPushRun-push
+        runs-on: ubuntu-latest
+        if: github.event_name == 'push'
+        
+        steps:
+            - name: Clone Repo
+              uses: actions/checkout@v4
+            
+            - name: Setup Node
+              uses: actions/node-setup@v6
+              with:
+                node-version: ${{ env.NODE_VERSION }}
+                cache: 'npm'
+
+            - name: Install npm
+              run: npm ci
+
+            - name: check format
+              run: npx prettier —check
+
+            - name: Lint check 
+              run: npm run lint
+
+        
