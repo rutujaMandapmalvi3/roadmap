@@ -10,7 +10,7 @@ const verifier = CognitoJwtVerifier.create({
   clientId: "4vfubuuruohh4sf1l2ihi57os7",
 });
 
-const authMiddleware = async (req, res, next) => {
+const authMiddleware = async (req, res, next, err) => {
   // frontend sends: Authorization: Bearer <token>
   // split(' ')[1] extracts just the token part after "Bearer "
   const token = req.headers.authorization?.split(" ")[1];
