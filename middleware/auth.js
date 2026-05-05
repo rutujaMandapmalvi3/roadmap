@@ -1,20 +1,20 @@
-const { CognitoJwtVerifier } = require('aws-jwt-verify');
-const User = require('../models/User');
+const { CognitoJwtVerifier } = require("aws-jwt-verify");
+const User = require("../models/User");
 
 // verifier is created once at startup and reused — it caches Cognito's public keys (JWKS)
 // so it doesn't fetch them from AWS on every single request
 const verifier = CognitoJwtVerifier.create({
-  userPoolId: 'us-east-2_iQY2juKJ5',
-  tokenUse: 'id',       // we use the ID token (contains user info like email)
-                        // access token would only tell us the user is logged in, not who they are
-  clientId: '4vfubuuruohh4sf1l2ihi57os7',
+  userPoolId: "us-east-2_iQY2juKJ5",
+  tokenUse: "id", // we use the ID token (contains user info like email)
+  // access token would only tell us the user is logged in, not who they are
+  clientId: "4vfubuuruohh4sf1l2ihi57os7",
 });
- 
+
 const authMiddleware = async (req, res, next) => {
   // frontend sends: Authorization: Bearer <token>
   // split(' ')[1] extracts just the token part after "Bearer "
-  const token = req.headers.authorization?.split(' ')[1];
-  if (!token) return res.status(401).json({ error: 'No token provided' });
+  const token = req.headers.authorization?.split(" ")[1];
+  if (!token) return res.status(401).json({ error: "No token provided" });
 
   try {
     // verify() checks: signature is valid, token is not expired, issuer matches our user pool
@@ -31,12 +31,12 @@ const authMiddleware = async (req, res, next) => {
     await User.findOneAndUpdate(
       { userId: payload.sub },
       { email: payload.email },
-      { upsert: true, new: true }
+      { upsert: true, new: true },
     );
 
     next();
   } catch (err) {
-    return res.status(401).json({ error: 'Invalid or expired token' });
+    return res.status(401).json({ error: "Invalid or expired token" });
   }
 };
 
