@@ -44,3 +44,13 @@ jobs:
       - name: Lint check
         run: npm run lint
         continue-on-error: true
+
+    onDeploy:
+      name: deploy code
+      runs-on: ubuntu-latest
+
+      concurrency: ${{ github.workflow }}-{{ github.ref }}
+
+      steps:
+        - name:
+          uses: 

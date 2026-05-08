@@ -6,6 +6,20 @@ const express = require("express");
 const Conversation = require("../models/Conversation"); // Mongoose model — maps to conversations collection in MongoDB
 const router = express.Router(); // creates a mini Express app just for these routes
 
+// GET / — returns all conversations for the logged-in user, newest first
+// skips messages + roadmap — too heavy for a list view
+router.get("/", async (req, res) => {
+  try {
+    const convos = await Conversation.find({ userId: req.user.userId })
+      .select("_id topic createdAt updatedAt")
+      .sort({ updatedAt: -1 });
+    res.json(convos);
+  } catch (error) {
+    console.error("Error fetching conversations:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
 // POST / — creates a brand new conversation and saves it to MongoDB
 router.post("/", async (req, res) => {
   try {

@@ -18,6 +18,7 @@ const messageSchema = new mongoose.Schema(
 const conversationSchema = new mongoose.Schema(
   {
     userId: { type: String, required: true, index: true },
+    topic: { type: String, required: true },
     messages: [messageSchema],
     roadmap: { type: mongoose.Schema.Types.Mixed, default: null },
   },

@@ -104,20 +104,164 @@ Returns the full conversation document including:
 
 ## Project Structure
 
+### Monorepo (production-grade layout)
+
+```
+intprep/                                          ← monorepo root
+│
+├── .github/
+│   ├── workflows/
+│   │   ├── ci-backend.yml                        ← lint, test, security, coverage on PR
+│   │   ├── ci-frontend.yml                       ← lint, type-check, test, lighthouse on PR
+│   │   ├── deploy-backend.yml                    ← backend only → ECS (separate from frontend)
+│   │   ├── deploy-frontend.yml                   ← frontend only → CloudFront/ECS
+│   │   ├── deploy-backend-rollback.yml           ← emergency rollback to previous SHA
+│   │   └── deploy-frontend-rollback.yml
+│   ├── CODEOWNERS                                ← enforces who reviews auth, deploy, infra changes
+│   ├── pull_request_template.md                  ← PR checklist
+│   └── ISSUE_TEMPLATE/
+│       ├── bug_report.md
+│       └── feature_request.md
+│
+├── .claude/                                      ← shared full-stack Claude SDLC skills
+│   ├── CLAUDE.md                                 ← monorepo context, full data flow, conventions
+│   ├── settings.json
+│   ├── docs/
+│   │   └── traceability.md                       ← FR → AC → IMPL → TEST → RELEASE matrix
+│   └── skills/
+│       ├── phase-1-requirements/SKILL.md         ← client ask → FRs + NFRs + ACs
+│       ├── phase-2-system-design/SKILL.md        ← FRs → component map, API contracts, data flow
+│       ├── phase-3-architecture/SKILL.md         ← design → tech stack, ADRs, infra decisions
+│       └── phase-9-traceability-audit/SKILL.md   ← verifies every FR traces to test to release
+│
+├── .aws/
+│   ├── task-definition-backend.json              ← ECS task definition for backend
+│   └── task-definition-frontend.json             ← ECS task definition for frontend
+│
+├── terraform/
+│   ├── main.tf
+│   ├── variables.tf
+│   ├── outputs.tf
+│   ├── backend.tf                                ← remote state (S3 + DynamoDB lock)
+│   └── modules/
+│       ├── networking/                           ← VPC, subnets, security groups
+│       ├── ecs/                                  ← cluster, services, task definitions
+│       ├── ecr/                                  ← container registries
+│       ├── cognito/                              ← user pool, app client
+│       ├── elasticache/                          ← Redis cluster
+│       └── mongodb-atlas/                        ← Atlas cluster via Terraform provider
+│
+├── docker/
+│   ├── backend.Dockerfile
+│   ├── frontend.Dockerfile
+│   └── nginx.conf                                ← reverse proxy config
+│
+├── docker-compose.yml                            ← local dev: backend + frontend + MongoDB + Redis
+├── docker-compose.test.yml                       ← integration test env: clean state per run
+│
+├── docs/
+│   ├── architecture/
+│   │   ├── ADR-001-mongodb-over-postgres.md      ← Architecture Decision Records
+│   │   ├── ADR-002-cognito-auth.md
+│   │   └── ADR-003-redis-rate-limiting.md
+│   ├── api/
+│   │   └── openapi.yaml                          ← API contract (OpenAPI spec)
+│   └── runbooks/
+│       ├── deploy.md
+│       ├── rollback.md
+│       └── incident-response.md
+│
+├── scripts/
+│   ├── seed-db.js                                ← local dev DB seeding
+│   ├── migrate.js                                ← DB migrations
+│   └── smoke-test.sh                             ← post-deploy smoke tests, runs after every deploy
+│
+├── myMap/                                        ← backend (this service)
+│   ├── .claude/
+│   │   ├── CLAUDE.md                             ← backend-specific rules + constraints
+│   │   └── skills/
+│   │       ├── phase-4-software-engineer/SKILL.md   ← guides impl, traces FR→code, never writes code
+│   │       ├── phase-5-unit-testing/SKILL.md
+│   │       ├── phase-6-integration-testing/SKILL.md
+│   │       ├── phase-7-security-review/SKILL.md
+│   │       ├── phase-8-code-review/SKILL.md
+│   │       └── phase-10-release-backend/SKILL.md    ← ECS deploy, canary, rollback
+│   ├── src/
+│   │   ├── index.js                              ← Express app, middleware, route mounting
+│   │   ├── db.js                                 ← MongoDB connection via Mongoose
+│   │   ├── middleware/
+│   │   │   └── auth.js                           ← Cognito JWT verification
+│   │   ├── models/
+│   │   │   ├── Conversation.js                   ← schema: { userId, topic, messages[], roadmap }
+│   │   │   └── User.js
+│   │   ├── routes/
+│   │   │   ├── chat.js                           ← POST /chat — new roadmap + follow-ups
+│   │   │   └── conversations.js                  ← GET /conversations, GET /conversations/:id
+│   │   └── services/
+│   │       └── openai.js                         ← OpenAI wrapper — generateRoadmap(messages)
+│   ├── tests/
+│   │   ├── unit/
+│   │   │   ├── auth.test.js
+│   │   │   ├── chat.test.js
+│   │   │   ├── conversations.test.js
+│   │   │   └── openai.test.js
+│   │   └── integration/
+│   │       ├── chat.integration.test.js
+│   │       └── conversations.integration.test.js
+│   ├── reports/                                  ← coverage.xml, security scan output
+│   ├── .env                                      ← secrets — never committed
+│   ├── .env.example                              ← placeholders only — committed
+│   └── package.json
+│
+└── mymap-client/                                 ← frontend (separate service, separate deploy)
+    ├── .claude/
+    │   ├── CLAUDE.md                             ← frontend-specific rules
+    │   └── skills/
+    │       ├── phase-4-software-engineer/SKILL.md
+    │       ├── phase-5-unit-testing/SKILL.md
+    │       ├── phase-7-security-review/SKILL.md
+    │       ├── phase-8-code-review/SKILL.md
+    │       └── phase-10-release-frontend/SKILL.md   ← CloudFront deploy, feature flags, rollback
+    ├── src/
+    │   ├── app/
+    │   │   ├── page.tsx                          ← home: roadmap list + create new form
+    │   │   ├── login/page.tsx
+    │   │   ├── signup/page.tsx
+    │   │   └── roadmap/page.tsx                  ← React Flow graph + follow-up form
+    │   ├── components/                           ← reusable UI components
+    │   ├── lib/
+    │   │   ├── api.ts                            ← API client (fetch functions)
+    │   │   ├── auth.ts
+    │   │   └── useAuth.ts                        ← redirect to /login if no token
+    │   └── types/                                ← shared TypeScript types
+    ├── tests/
+    │   ├── unit/
+    │   └── e2e/                                  ← Playwright
+    ├── .env.local                                ← secrets — never committed
+    ├── .env.example
+    ├── next.config.ts
+    └── tsconfig.json
+```
+
+### Current implementation (this repo)
+
 ```
 myMap/
-├── index.js              # Entry point — Express app, middleware, route mounting
-├── db.js                 # MongoDB connection via Mongoose
-├── .env                  # Secrets (MONGODB_URI, OPENAI_API_KEY) — never committed
-├── .gitignore
-├── package.json
+├── index.js
+├── db.js
+├── middleware/auth.js
 ├── models/
-│   └── Conversation.js   # Mongoose schema: { userId, messages[], roadmap }
+│   ├── Conversation.js
+│   └── User.js
 ├── routes/
-│   ├── conversations.js  # CRUD routes for conversations
-│   └── chat.js           # Main /chat route — generates roadmap via OpenAI
-└── services/
-    └── openai.js         # OpenAI wrapper — generateRoadmap(messages)
+│   ├── chat.js
+│   └── conversations.js
+├── services/openai.js
+└── tests/unit/
+    ├── auth.test.js
+    ├── chat.test.js
+    ├── conversations.test.js
+    └── openai.test.js
 ```
 
 ---

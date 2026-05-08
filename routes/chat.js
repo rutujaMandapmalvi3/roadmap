@@ -109,6 +109,7 @@ router.post("/", async (req, res) => {
       // fresh start — create new conversation document in MongoDB
       const convo = await Conversation.create({
         userId,
+        topic,
         messages,
         roadmap: JSON.parse(roadmap),
       });

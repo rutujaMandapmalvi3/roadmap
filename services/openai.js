@@ -3,7 +3,12 @@
 // and returns the raw JSON string. Normalizes rate-limit and API errors before throwing.
 const OpenAI = require("openai");
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const TIMEOUT_MS = parseInt(process.env.OPENAI_TIMEOUT_MS, 10) || 30000;
+
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+  timeout: TIMEOUT_MS, // abort if OpenAI hangs — prevents indefinite spinner on frontend
+});
 
 /** Sends a message array to OpenAI and returns the raw JSON string response. */
 async function generateRoadmap(messages) {
@@ -16,7 +21,9 @@ async function generateRoadmap(messages) {
     return response.choices[0].message.content;
   } catch (error) {
     if (error.status === 429)
-      throw new Error("Rate limit hit — try again in a moment");
+      throw new Error("OpenAI rate limit hit — try again in a moment");
+    if (error.name === "APIConnectionTimeoutError")
+      throw new Error("OpenAI timed out — please try again");
     throw new Error("OpenAI unavailable — please try again");
   }
 }
